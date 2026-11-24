@@ -1,7 +1,7 @@
 //! SQL dialect detection from input text or token stream.
 
 use relune_core::SqlDialect;
-use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{Dialect, GenericDialect, MySqlDialect, PostgreSqlDialect};
 use sqlparser::tokenizer::{Token, Tokenizer};
 
 /// Detect the SQL dialect from the content of the SQL string.
@@ -238,6 +238,6 @@ pub(crate) fn dialect_impl(dialect: SqlDialect) -> Box<dyn Dialect> {
     match dialect {
         SqlDialect::Postgres | SqlDialect::Auto => Box::new(PostgreSqlDialect {}),
         SqlDialect::Mysql => Box::new(MySqlDialect {}),
-        SqlDialect::Sqlite => Box::new(SQLiteDialect {}),
+        SqlDialect::Sqlite => Box::new(crate::sqlite::SchemaSqliteDialect),
     }
 }

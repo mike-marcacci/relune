@@ -3407,3 +3407,54 @@ fn mysql_inline_column_comment_is_captured() {
         .expect("email column");
     assert_eq!(email.comment.as_deref(), Some("login email"));
 }
+
+#[test]
+fn sqlite_checks_preserve_negated_patterns_and_is_expressions() {
+    let sql = "CREATE TABLE t (id TEXT PRIMARY KEY, parent TEXT REFERENCES t(id),
+        digest TEXT CHECK (digest IS NULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')),
+        a TEXT CHECK (a NOT MATCH 'x' AND a NOT REGEXP 'y'),
+        b TEXT CHECK (b IS parent OR b IS NOT id));";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    let table = &schema.tables[0];
+    assert_eq!(table.foreign_keys.len(), 1);
+    assert_eq!(
+        table.columns[2].semantics.check_constraints[0].expression,
+        "digest IS NULL OR (length(digest) = 64 AND digest NOT GLOB '*[^0-9a-f]*')"
+    );
+    assert_eq!(
+        table.columns[3].semantics.check_constraints[0].expression,
+        "a NOT MATCH 'x' AND a NOT REGEXP 'y'"
+    );
+    assert_eq!(
+        table.columns[4].semantics.check_constraints[0].expression,
+        "b IS parent OR b IS NOT id"
+    );
+}
+
+#[test]
+fn sqlite_pragmas_and_multi_statement_triggers_do_not_consume_tables() {
+    let sql = "PRAGMA foreign_keys = ON; PRAGMA main.journal_mode(WAL);
+        PRAGMA busy_timeout = 5000; PRAGMA table_info('t');
+        CREATE TABLE t (id TEXT PRIMARY KEY, value TEXT);
+        CREATE TRIGGER forget AFTER UPDATE OF value ON t
+        WHEN OLD.value IS NOT NEW.value BEGIN
+            UPDATE t SET value = CASE WHEN NEW.id IS OLD.id THEN 'END;' ELSE NULL END;
+            DELETE FROM t WHERE id = NEW.id;
+        END;
+        CREATE TABLE child (id TEXT PRIMARY KEY, parent TEXT REFERENCES t(id));";
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(sql, SqlDialect::Sqlite);
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(schema.tables.len(), 2);
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("CREATE TRIGGER"))
+            .count(),
+        1
+    );
+}
