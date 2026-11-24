@@ -3407,3 +3407,65 @@ fn mysql_inline_column_comment_is_captured() {
         .expect("email column");
     assert_eq!(email.comment.as_deref(), Some("login email"));
 }
+
+#[test]
+fn postgres_multiline_comments_preserve_every_fragment() {
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(
+        r"CREATE TABLE t (id INT PRIMARY KEY, value TEXT);
+        COMMENT ON TABLE t IS 'First; '
+            'second''s '
+            'last.';
+        COMMENT ON COLUMN t.value IS 'Column '
+            /* continued */ 'description';
+        CREATE TABLE child (parent INT REFERENCES t(id));",
+        SqlDialect::Postgres,
+    );
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    let schema = output.schema.unwrap();
+    assert_eq!(
+        schema.tables[0].comment.as_deref(),
+        Some("First; second's last.")
+    );
+    assert_eq!(
+        schema.tables[0].columns[1].comment.as_deref(),
+        Some("Column description")
+    );
+    assert_eq!(schema.tables[1].foreign_keys.len(), 1);
+}
+
+#[test]
+fn postgres_routine_comment_signatures_do_not_consume_following_tables() {
+    let output = parse_sql_to_schema_with_diagnostics_and_dialect(
+        r#"COMMENT ON FUNCTION prune(INTERVAL) IS 'First '
+            'second';
+        COMMENT ON FUNCTION "app"."f"(IN "a" NUMERIC(10, 2), TEXT[]) IS NULL;
+        COMMENT ON PROCEDURE run() IS 'routine';
+        CREATE TABLE t (id INT PRIMARY KEY);"#,
+        SqlDialect::Postgres,
+    );
+    assert!(!output.has_errors(), "{:?}", output.diagnostics);
+    assert_eq!(output.schema.unwrap().tables.len(), 1);
+    assert_eq!(output.diagnostics.len(), 3);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|d| d.message.contains("COMMENT ON"))
+    );
+}
+
+#[test]
+fn postgres_comment_adapter_still_reports_malformed_sql() {
+    for comment in [
+        "COMMENT ON TABLE t IS 'first' 'same line';",
+        "COMMENT ON FUNCTION f(INTERVAL IS 'unclosed';",
+        "COMMENT ON FUNCTION f() IS;",
+        "COMMENT ON TABLE t IS NULL\n'not a continuation';",
+    ] {
+        let sql =
+            format!("CREATE TABLE t (id INT); {comment} CREATE TABLE after_comment (id INT);");
+        let output = parse_sql_to_schema_with_diagnostics_and_dialect(&sql, SqlDialect::Postgres);
+        assert!(output.has_errors(), "{comment}");
+        assert_eq!(output.schema.unwrap().tables.len(), 2, "{comment}");
+    }
+}

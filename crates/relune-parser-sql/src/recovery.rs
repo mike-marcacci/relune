@@ -3,7 +3,8 @@
 use crate::context::{LineOffsets, ParseContext, source_span_from_sql_span};
 use relune_core::{Diagnostic, diagnostic::codes};
 use sqlparser::ast::Statement;
-use sqlparser::dialect::Dialect;
+use sqlparser::dialect::{Dialect, PostgreSqlDialect};
+use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::Token;
 
@@ -47,7 +48,12 @@ pub(crate) fn parse_statements_with_recovery(
             break;
         }
 
-        match parser.parse_statement() {
+        let result = if dialect.is::<PostgreSqlDialect>() && parser.peek_keyword(Keyword::COMMENT) {
+            crate::postgres_comment::parse_comment(&mut parser)
+        } else {
+            parser.parse_statement()
+        };
+        match result {
             Ok(stmt) => {
                 statements.push(stmt);
             }
