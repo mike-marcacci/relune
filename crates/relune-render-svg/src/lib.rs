@@ -100,12 +100,20 @@ pub fn render_svg_with_overlay(
     overlay: Option<&relune_layout::DiagramOverlay>,
 ) -> Result<SvgArtifact, SvgRenderError> {
     let colors = get_colors(options.theme);
+    // Layout bounds describe the graph alone. Reserve a footer at render time
+    // so opting into the legend cannot obscure the graph's bottommost content.
+    let height = graph.height
+        + if options.show_legend {
+            legend::LEGEND_FOOTER_HEIGHT
+        } else {
+            0.0
+        };
     let mut out = String::with_capacity(estimate_svg_capacity(graph, options, overlay));
 
     write!(
         out,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{:.0}" height="{:.0}" viewBox="0 0 {:.0} {:.0}" fill="none">"#,
-        graph.width, graph.height, graph.width, graph.height
+        graph.width, height, graph.width, height
     )?;
     out_push_defs(&mut out, &colors)?;
     write!(
@@ -168,7 +176,7 @@ pub fn render_svg_with_overlay(
     // Render legend if requested
     if options.show_legend {
         let diff = overlay.is_some_and(|overlay| !overlay.is_empty());
-        render_legend(&mut out, &colors, None, diff, graph.width, graph.height)?;
+        render_legend(&mut out, &colors, None, diff, graph.width, height)?;
     }
 
     out.push_str("</svg>");
@@ -1355,6 +1363,45 @@ mod tests {
         assert!(svg.contains("Foreign key"));
         assert!(svg.contains("Indexed"));
         assert!(svg.contains("nullable"));
+    }
+
+    #[test]
+    fn legend_reserves_space_below_the_entire_graph() {
+        let graph = relune_layout::build_layout(
+            &relune_parser_sql::parse_sql_to_schema_with_diagnostics(
+                "CREATE TABLE t (id INT PRIMARY KEY, name TEXT, description TEXT);",
+            )
+            .schema
+            .unwrap(),
+        )
+        .unwrap();
+        for show_legend in [false, true] {
+            let svg = render_svg(
+                &graph,
+                SvgRenderOptions {
+                    show_legend,
+                    ..Default::default()
+                },
+            );
+            let doc = roxmltree::Document::parse(&svg).unwrap();
+            let root = doc.root_element();
+            let height: f32 = root.attribute("height").unwrap().parse().unwrap();
+            if show_legend {
+                let legend = doc
+                    .descendants()
+                    .find(|n| n.attribute("class") == Some("legend-background"))
+                    .unwrap();
+                let top: f32 = legend.attribute("y").unwrap().parse().unwrap();
+                let bar_height: f32 = legend.attribute("height").unwrap().parse().unwrap();
+                assert!(top > graph.height, "legend overlaps the graph");
+                assert!(
+                    top + bar_height < height,
+                    "legend extends beyond the canvas"
+                );
+            } else {
+                assert!((height - graph.height).abs() < 0.5);
+            }
+        }
     }
 
     #[test]
