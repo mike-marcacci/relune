@@ -24,6 +24,7 @@ mod mysql_enum;
 mod names;
 mod query_columns;
 mod recovery;
+mod sqlite;
 mod view;
 
 use relune_core::{Diagnostic, Enum, Schema, Severity, SqlDialect, View};
