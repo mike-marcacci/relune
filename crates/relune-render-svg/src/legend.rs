@@ -12,6 +12,11 @@ use crate::diff::{render_change_marker, render_risk_pill};
 use crate::node::{ColumnBadge, render_column_badge};
 use crate::theme::ThemeColors;
 
+const LEGEND_BAR_HEIGHT: f32 = 42.0;
+const LEGEND_MARGIN: f32 = 18.0;
+/// Extra canvas below the graph; the legend must never cover a node or edge.
+pub(crate) const LEGEND_FOOTER_HEIGHT: f32 = LEGEND_BAR_HEIGHT + LEGEND_MARGIN * 2.0;
+
 /// Width taken by the title, badges, and nullable marker, including padding.
 const LEGEND_ITEMS_WIDTH: f32 = 488.0;
 /// Width added for the diff change kinds, the risk label, and their divider.
@@ -41,9 +46,9 @@ pub fn render_legend(
     svg_width: f32,
     svg_height: f32,
 ) -> fmt::Result {
-    let bar_height = 42.0;
-    let side_padding = 18.0;
-    let available_width = svg_width - side_padding * 2.0;
+    let bar_height = LEGEND_BAR_HEIGHT;
+    let side_padding = LEGEND_MARGIN;
+    let available_width = svg_width - (side_padding + side_padding);
     // The legend never shrinks below its items; on narrower canvases the
     // whole bar is scaled down instead of letting items run off the edge.
     let content_width = LEGEND_ITEMS_WIDTH
@@ -55,7 +60,7 @@ pub fn render_legend(
         };
     let legend_width = available_width.clamp(content_width, content_width.max(640.0));
     let legend_x = (svg_width - legend_width) * 0.5;
-    let legend_y = svg_height - bar_height - 18.0;
+    let legend_y = svg_height - bar_height - LEGEND_MARGIN;
     let mut cursor_x = legend_x + 16.0;
     let baseline_y = legend_y + 25.0;
 
